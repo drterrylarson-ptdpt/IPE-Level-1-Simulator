@@ -6,7 +6,23 @@ module.exports = async (req, res) => {
     return;
   }
   try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    // Read the raw request body ourselves, so parsing never depends on Vercel's guesswork.
+    let raw = "";
+    if (req.body && typeof req.body === "object") {
+      raw = JSON.stringify(req.body);
+    } else if (typeof req.body === "string" && req.body.length) {
+      raw = req.body;
+    } else {
+      raw = await new Promise((resolve) => {
+        let d = "";
+        req.on("data", (c) => (d += c));
+        req.on("end", () => resolve(d));
+        req.on("error", () => resolve(""));
+      });
+    }
+
+    const payload = raw ? JSON.parse(raw) : {};
+
     const upstream = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -14,8 +30,9 @@ module.exports = async (req, res) => {
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     });
+
     const data = await upstream.json();
     res.status(upstream.status).json(data);
   } catch (err) {
